@@ -1,0 +1,816 @@
+---
+title: "ORA"
+author: "Howard Cen"
+date: "2024-11-20"
+output: html_document
+---
+
+```{r }
+library(tidyverse)
+library(msigdbr) # load MSigDB gene sets, v7.5.1 (released January 2022)
+library("clusterProfiler")
+library("ReactomePA")
+#install.packages("openxlsx")
+library(openxlsx)
+
+library(org.Mm.eg.db) # for mouse
+library(org.Hs.eg.db) # for human
+```
+
+```{r ORA-function}
+ora_human <- function(x, all_genes, name){ 
+  
+    # remove duplicated entrez
+  
+  x <- x[order(x$pvalue),]
+  x <- x[!duplicated(x$entrez),]
+  x <- x[!is.na(x$entrez), ]
+  
+  x$entrez <- as.character(x$entrez)
+  
+  all_genes  = as.character(all_genes)
+  
+  #KEGG ORA
+  KEGG <- enrichKEGG(gene         = x$entrez,
+                     organism     = 'hsa',
+                     universe      = all_genes,
+                     pAdjustMethod="BH", 
+                     pvalueCutoff=1, 
+                     qvalueCutoff=1,
+                     minGSSize = 15,
+                     maxGSSize = 500)
+  KEGG <- setReadable(KEGG, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  KEGG.df <- as.data.frame(KEGG)
+  head(KEGG.df)
+
+  #Reactome ORA
+  react <- enrichPathway(gene         = x$entrez,
+                         organism     = 'human',
+                         universe      = all_genes,
+                         minGSSize = 15,
+                         maxGSSize = 500,
+                         pvalueCutoff=1, pAdjustMethod="BH", 
+                         qvalueCutoff=1)
+  react <- setReadable(react, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  react.df <- as.data.frame(react)
+  head(react.df)
+  #react.df2 <- react.df
+  #react.df2$Description <- gsub(x = react.df2$Description, pattern = "\\ ",replacement = "_") 
+  #react.df2$Description <- gsub(x = react.df2$Description, pattern = "\\,",replacement = ".")
+  #write.xlsx2(react.df, file="output/correlated_genes_ORA.xlsx", sheetName = "Reactome",
+  #            col.names = TRUE, row.names = TRUE, append = TRUE)
+  
+  gobp <- enrichGO(gene        = x$entrez,
+                    universe      = all_genes,
+                    OrgDb         = org.Hs.eg.db,
+                    ont           = "BP",
+                    pAdjustMethod = "BH",
+                    pvalueCutoff  = 1,
+                    qvalueCutoff  = 1,
+                    minGSSize = 15,
+                    maxGSSize = 500,
+                    readable      = TRUE)
+  gobp.df <- as.data.frame(gobp)
+  head(gobp.df)
+  #write.xlsx2(gobp.df, file="output/correlated_genes_ORA.xlsx", sheetName = "GO_BP",
+  #            col.names = TRUE, row.names = TRUE, append = TRUE)
+  
+  gomf <- enrichGO(gene       = x$entrez,
+                    universe      = all_genes,
+                    OrgDb         = org.Hs.eg.db,
+                    ont           = "MF",
+                    pAdjustMethod = "BH",
+                    pvalueCutoff  = 1,
+                    qvalueCutoff  = 1,
+                    minGSSize = 15,
+                    maxGSSize = 500,
+                    readable      = TRUE)
+  gomf.df <- as.data.frame(gomf)
+  head(gomf.df)
+  #write.xlsx2(gomf.df, file="output/correlated_genes_ORA.xlsx", sheetName = "GO_MF",
+  #            col.names = TRUE, row.names = TRUE, append = TRUE)
+  
+  gocc <- enrichGO(gene      = x$entrez,
+                    universe      = all_genes,
+                    OrgDb         = org.Hs.eg.db,
+                    ont           = "CC",
+                    pAdjustMethod = "BH",
+                    pvalueCutoff  = 1,
+                    qvalueCutoff  = 1,
+                    minGSSize = 15,
+                    maxGSSize = 500,
+                    readable      = TRUE)
+  gocc.df <- as.data.frame(gocc)
+  head(gocc.df)
+  #write.xlsx2(gocc.df, file="output/correlated_genes_ORA.xlsx", sheetName = "GO_CC",
+  #            col.names = TRUE, row.names = TRUE, append = TRUE)
+  
+  # MSigDb ORA
+  h_t2g.h <- msigdbr(species = "Homo sapiens", category = "H") %>% 
+    dplyr::select(gs_name, entrez_gene)
+  head(h_t2g.h)
+  
+  
+  hallmark <- enricher(x$entrez,
+                       TERM2GENE=h_t2g.h,
+                        universe  = all_genes,
+                       pvalueCutoff = 1,
+                       qvalueCutoff = 1,
+                       minGSSize = 15,
+                       maxGSSize = 500
+                       )
+
+  hallmark <- setReadable(hallmark, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  hallmark.df <- as.data.frame(hallmark)
+  View(hallmark.df)
+  #
+
+
+wb <- createWorkbook()
+
+# Add the data frames to separate sheets
+addWorksheet(wb, "MSigDB_hallmark")
+writeData(wb, "MSigDB_hallmark", hallmark.df)
+
+addWorksheet(wb, "KEGG")
+writeData(wb, "KEGG", KEGG.df)
+
+addWorksheet(wb, "Reactome")
+writeData(wb, "Reactome", react.df)
+
+addWorksheet(wb, "GO_BP")
+writeData(wb, "GO_BP", gobp.df)
+
+addWorksheet(wb, "GO_MF")
+writeData(wb, "GO_MF", gomf.df)
+
+addWorksheet(wb, "GO_CC")
+writeData(wb, "GO_CC", gocc.df)
+
+
+# Save the workbook to a file
+saveWorkbook(wb, paste0("output/ORA_", name,".xlsx"), overwrite = TRUE)
+
+cat(paste0("ORA results saved in - output/ORA_", name,".xlsx"))
+}
+
+```
+
+```{r GSEA function}
+
+gsea_human <- function(df,FC_col, p_col, name){ 
+  
+  #df = pro.de
+  #FC_col = "logFC"
+  #p_col = "p"
+  #name = "proteomics_T2D"
+  
+  # remove duplicated entrez
+  
+  df <- df[order(df[[p_col]]),]
+  df <- df[!duplicated(df$entrez),]
+  df <- df[!is.na(df$entrez), ]
+
+  # option1 rank by log2FC value
+  #genelist <- df$log2FoldChange
+  
+  # option2 rank by signed -log10 p value
+  genelist <- sign(df[[FC_col]]) * (-log10(df[[p_col]]))
+  
+  # option3 rank by log2FC*(-log10 p value)
+  #genelist <- (df$log2FoldChange) * (-log10(df$pvalue))
+  
+  # entrez id as names of the gene list
+  names(genelist) <- df$entrez
+  
+  
+  genelist[genelist==Inf] <- max(genelist)
+  genelist[genelist==-Inf] <- min(genelist[is.finite(genelist)])
+  
+  
+  genelist = sort(genelist, decreasing = TRUE)
+ genelist <- na.omit(genelist)
+  
+  head(genelist)
+  
+  gse.kegg <- gseKEGG(
+    geneList=genelist,
+    organism = "hsa",
+    minGSSize = 15, 
+    maxGSSize = 500,
+    pvalueCutoff = 1,
+    keyType = "kegg"
+  )
+  gse.kegg <- setReadable(gse.kegg, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  gse.kegg.df <- as.data.frame(gse.kegg)
+
+  gseReactome <- gsePathway(
+    geneList=genelist,
+    organism = "human",
+    minGSSize = 15, 
+    maxGSSize = 500,
+    pvalueCutoff = 1,
+    verbose = TRUE)
+  gseReactome <- setReadable(gseReactome, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  gseReactome.df <- as.data.frame(gseReactome)
+  
+  gseGO.bp <- gseGO(
+    geneList=genelist,
+    ont = "BP",
+    OrgDb = org.Hs.eg.db,
+    minGSSize = 15, 
+    maxGSSize = 500,
+    pvalueCutoff = 1,
+    verbose = TRUE,
+    keyType = "ENTREZID"
+  )
+  gseGO.bp <- setReadable(gseGO.bp, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  gseGO.bp.df <- as.data.frame(gseGO.bp)
+ 
+  gseGO.mf <- gseGO(
+    geneList=genelist,
+    ont = "MF",
+    OrgDb = org.Hs.eg.db,
+    minGSSize = 15, 
+    maxGSSize = 500,
+    pvalueCutoff = 1,
+    verbose = TRUE,
+    keyType = "ENTREZID"
+  )
+  gseGO.mf <- setReadable(gseGO.mf, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  gseGO.mf.df <- as.data.frame(gseGO.mf)
+
+  gseGO.cc <- gseGO(
+    geneList=genelist,
+    ont = "CC",
+    OrgDb = org.Hs.eg.db,
+    minGSSize = 15, 
+    maxGSSize = 500,
+    pvalueCutoff = 1,
+    verbose = TRUE,
+    keyType = "ENTREZID"
+  )
+  gseGO.cc <- setReadable(gseGO.cc, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  gseGO.cc.df <- as.data.frame(gseGO.cc)
+
+
+#  gse.mkegg <- gseMKEGG(
+#    geneList=genelist,
+#    organism = "hsa",
+#    minGSSize = 15, 
+#    maxGSSize = 500,
+#    pvalueCutoff = 1,
+#    keyType = "kegg"
+#  )
+#  gse.mkegg <- setReadable(gse.mkegg, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+#  gse.mkegg.df <- as.data.frame(gse.mkegg)
+
+  
+#  gse.wp <- gseWP(geneList = genelist, organism = "Homo sapiens",
+#                  minGSSize = 15, 
+#                  maxGSSize = 500,
+#                  pvalueCutoff = 1)
+#  gse.wp <- setReadable(gse.wp, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+#  gse.wp.df <- as.data.frame(gse.wp)
+
+
+  # mSigDB Hallmark gene sets  
+  #msigdbr_show_species()
+  #m_df <- msigdbr(species = "Mus musculus")
+  #head(m_df, 2) %>% as.data.frame
+  
+  # H: hallmark gene sets
+  # C1: positional gene sets
+  # C2: curated gene sets
+  # C3: motif gene sets
+  # C4: computational gene sets
+  # C5: GO gene sets
+  # C6: oncogenic signatures
+  # C7: immunologic signatures
+  
+  # MSigDb GSEA
+  
+  #msigdbr_show_species()
+  h_t2g.h <- msigdbr(species = "Homo sapiens", category = "H") %>% 
+    dplyr::select(gs_name, entrez_gene)
+  head(h_t2g.h)
+  
+  gse.hallmark <- GSEA(geneList = genelist,
+                          minGSSize = 15, 
+                          maxGSSize = 500,
+                          eps = 1e-20,
+                          pvalueCutoff = 1,
+                          pAdjustMethod = "BH",
+                          TERM2GENE = h_t2g.h)
+  
+  gse.hallmark <- setReadable(gse.hallmark, OrgDb = org.Hs.eg.db, keyType="ENTREZID") # The geneID column is translated from EntrezID to symbol
+  
+  gse.hallmark.df <- as.data.frame(gse.hallmark)
+  
+  
+  # Add the data frames to separate sheets
+  wb <- createWorkbook()
+    
+  addWorksheet(wb, "MSigDB_Hallmark")
+  writeData(wb, "MSigDB_Hallmark", gse.hallmark.df)
+  
+  addWorksheet(wb, "KEGG")
+  writeData(wb, "KEGG", gse.kegg.df)
+  
+  addWorksheet(wb, "Reactome")
+  writeData(wb, "Reactome", gseReactome.df)
+  
+  addWorksheet(wb, "GO_BP")
+  writeData(wb, "GO_BP", gseGO.bp.df)
+  
+  addWorksheet(wb, "GO_MF")
+  writeData(wb, "GO_MF", gseGO.mf.df)
+  
+  addWorksheet(wb, "GO_CC")
+  writeData(wb, "GO_CC", gseGO.cc.df)
+
+# Save the workbook to a file
+  fpath <- paste0("output/GSEA_p_", name, ".xlsx")
+  saveWorkbook(wb, fpath, overwrite = TRUE)
+  
+  cat(paste0("GSEA results saved in - ", fpath))
+  
+}
+
+```
+
+
+```{r run-ORA-GSEA}
+#res <- read.delim(file="output/ISX_DE_results.txt", row.names = 1)
+
+res <- read.delim(file="output/ISX_DE_LFCshrinkage_results.txt", row.names = 1)
+
+
+# save results - significant genes (DEG)
+res.sig <- res[res$padj <= 0.05,]
+dim(res.sig) # 6866 DE
+
+#write.table(res.sig, sep="\t",file=paste0("output/Results_DE.txt"), row.names=TRUE,col.names=NA,quote=FALSE)
+
+res.up <- res.sig[res.sig$log2FoldChange>0,]
+res.down <- res.sig[res.sig$log2FoldChange<0,]
+
+dim(res.up) #  3612 up
+dim(res.down) # 3254 down
+
+#ora_human(x =  res.up, all_genes = res$entrez, name = "ISX_up")
+#ora_human(x =  res.down, all_genes = res$entrez, name = "ISX_down")
+
+#ora_human(x =  res.sig, all_genes = res$entrez, name = "ISX")
+
+#gsea_human(df = res, FC_col = "log2FoldChange", p_col = "pvalue", name = "ISX")
+
+ora_human(x =  res.up, all_genes = res$entrez, name = "ISX_up_LFCshrinkage")
+ora_human(x =  res.down, all_genes = res$entrez, name = "ISX_down_LFCshrinkage")
+
+ora_human(x =  res.sig, all_genes = res$entrez, name = "ISX_LFCshrinkage")
+
+gsea_human(df = res, FC_col = "log2FoldChange", p_col = "pvalue", name = "ISX_LFCshrinkage")
+```
+
+
+
+```{r format-enrichmap}
+
+df = res
+FC_col = "log2FoldChange"
+p_col = "pvalue"
+
+df$Gene <- df$symbol
+df$Rank <- sign(df[[FC_col]]) * (-log10(df[[p_col]]))
+df$Rank[df$Rank==Inf] <- max(df$Rank)+1
+df$Rank[df$Rank==-Inf] <- -max(df$Rank)-1
+df <- na.omit(df)
+View(df)
+write.csv(df[c("Gene","Rank")], "output/erichmap_upload.csv", row.names = F)
+  # remove duplicated entrez
+  
+  df <- df[order(df[[p_col]]),]
+  df <- df[!duplicated(df$entrez),]
+  df <- df[!is.na(df$entrez), ]
+
+  # option1 rank by log2FC value
+  #genelist <- df$log2FoldChange
+  
+  # option2 rank by signed -log10 p value
+  genelist <- sign(df[[FC_col]]) * (-log10(df[[p_col]]))
+  
+  # option3 rank by log2FC*(-log10 p value)
+  #genelist <- (df$log2FoldChange) * (-log10(df$pvalue))
+  
+  # entrez id as names of the gene list
+  names(genelist) <- df$entrez
+  
+  
+  genelist[genelist==Inf] <- max(genelist)
+  genelist[genelist==-Inf] <- min(genelist[is.finite(genelist)])
+  
+  
+  genelist = sort(genelist, decreasing = TRUE)
+ genelist <- na.omit(genelist)
+ 
+```
+
+
+```{R topGO-incomplete}
+
+library(topGO)
+library(GO.db)
+library(biomaRt)
+library(Rgraphviz)
+library(org.Hs.eg.db)
+library(KEGGREST)
+
+library(tidyverse)
+
+#rm(list=ls())
+
+# background file
+liver.pro <- read.csv("output/liver_proteomics_master.csv", check.names = F) 
+iWAT.pro <- read.csv("output/iWAT_proteomics_master.csv", check.names = F) 
+muscle.pro <- read.csv("output/muscle_proteomics_master.csv", check.names = F)
+
+liver.pro.CSCW <- liver.pro %>% filter(welch.q.CS_CW <0.05) 
+nrow(liver.pro.CSCW) #1613
+run_topGO_mouse(geneUniverse = liver.pro$entrez, genesOfInterest = liver.pro.CSCW$entrez, ID = 'entrezgene_id', name = 'liver_proteomics_CSCW')
+
+liver.pro.KSCS <- liver.pro %>% filter(welch.q.KS_CS <0.05) 
+nrow(liver.pro.KSCS) #177
+run_topGO_mouse(geneUniverse = liver.pro$entrez, genesOfInterest = liver.pro.KSCS$entrez, ID = 'entrezgene_id', name = 'liver_proteomics_KSCS')
+
+
+iWAT.pro.CSCW <- iWAT.pro %>% filter(welch.q.CS_CW <0.05) 
+nrow(iWAT.pro.CSCW) #136
+run_topGO_mouse(geneUniverse = iWAT.pro$entrez, genesOfInterest = iWAT.pro.CSCW$entrez, ID = 'entrezgene_id', name = 'iWAT_proteomics_CSCW')
+
+iWAT.pro.KSCS <- iWAT.pro %>% filter(welch.q.KS_CS <0.05) 
+nrow(iWAT.pro.KSCS) #177
+run_topGO_mouse(geneUniverse = iWAT.pro$entrez, genesOfInterest = iWAT.pro.KSCS$entrez, ID = 'entrezgene_id', name = 'iWAT_proteomics_KSCS')
+geneUniverse = res$entrez
+
+geneUniverse = res$ENSG
+ID = 'ensembl_gene_id'
+genesOfInterest = res.down$entrez
+# create GO db for genes to be used (bg contains goi already) using biomaRt - takes a while
+  # options(timeout = 180) # 3min
+  db <- useMart('ENSEMBL_MART_ENSEMBL',dataset= Organism, host="https://www.ensembl.org") #'hsapiens_gene_ensembl' 'mmusculus_gene_ensembl'
+  #View(listAttributes(db))
+  
+  go_ids <- getBM(attributes = c('go_id', 'external_gene_name','entrezgene_id', 'ensembl_gene_id', 'namespace_1003'), 
+                  filters = ID, 
+                  values = geneUniverse, mart=db, useCache = FALSE)
+  
+  View(go_ids)
+  # build the gene 2 GO annotation list (needed to create topGO object)
+  gene_2_GO <- unstack(go_ids[,c(1,2)])
+View(gene_2_GO)  
+
+run_topGO <- function(geneUniverse,
+                      Organism = 'hsapiens_gene_ensembl', # 'mmusculus_gene_ensembl', 
+                      genesOfInterest, 
+                      ID = 'entrezgene_id', 
+                      name){
+  
+  
+  #Organism = 'hsapiens_gene_ensembl' or 'mmusculus_gene_ensembl', 
+  #geneUniverse = liver.pro$entrez
+  #genesOfInterest = liver.pro.CSCW$entrez
+  #ID =  'entrezgene_id' Or 'external_gene_name', 'ensembl_gene_id'
+  #name = 'liver_proteomics'
+  
+ 
+  
+  # remove any test genes without GO annotation
+  keep <- genesOfInterest %in% go_ids[,2]
+  genesOfInterest <- genesOfInterest[keep]
+  
+  # make named factor showing which genes are of interest (GOI will be 1, other backgound genes will be 0)
+  geneList <- factor(as.integer(geneUniverse %in% genesOfInterest)) 
+  names(geneList) <- geneUniverse
+  
+  
+  # make topGO data object we need:
+  # ontology: character string specifying the ontology of interest (BP, MF or CC)
+  # allGenes: named vector of type numeric or factor. The names attribute contains the genes identifiers. The genes listed in this object define the gene universe.
+  # nodeSize: an integer larger or equal to 1. This parameter is used to prune the GO hierarchy from the terms which have less than nodeSize annotated genes (after the true path rule is applied).
+  # annotationFun: function which maps genes identifiers to GO terms. There are a couple of annotation function included in the package trying to address the user’s needs.
+  # The annotation functions take three arguments. One of those arguments is specifying where the mappings can be found, and needs to be provided by the user.
+  # annFUN.gene2GO this function is used when the annotations are provided as a gene-to-GOs mapping.
+  
+  GOdata <- new('topGOdata', ontology='BP', allGenes = geneList, 
+                nodeSize = 15,
+                geneSelectionFun = function(x)(x == 1), annot = annFUN.gene2GO, gene2GO = gene_2_GO)
+  
+  # TEST FOR SIGNIFICANCE
+  
+  # define test using the classic algorithm with fisher (refer to [1] if you want to understand how the different algorithms work)
+  classic_fisher_result <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+  # define test using the weight01 algorithm (default) with fisher
+  weight_fisher_result <- runTest(GOdata, algorithm='weight01', statistic='fisher') # see Alexa 2006, Bioinformatics 22, no. 13 doi:10.1093/bioinformatics/btl140.
+  # ks_result <- runTest(GOdata, algorithm = "weight01", statistic = "ks")
+  # elim_fisher_result <- runTest(GOdata, algorithm='elim', statistic='fisher')
+
+
+  # check results 
+  tab <- GenTable(GOdata, raw.p.value = weight_fisher_result, topNodes = length(weight_fisher_result@score), numChar = 120)
+  
+  # generate a table of results
+  allGO <- usedGO(GOdata)
+  all_res <- GenTable(GOdata, Fisher=classic_fisher_result, weightFisher=weight_fisher_result, orderBy='weightFisher', ranksOf='weightFisher', topNodes=length(allGO), numChar = 150)
+  
+  
+  all_res <- all_res[order(all_res$Fisher),]
+  # perform BH correction on p values
+  fdr <- round(p.adjust(all_res$Fisher, method="BH"),digits = 10)
+  
+  # create the file with all the statistics from GO analysis
+  all_res_final<-cbind(all_res,fdr)
+  
+  # get gene symbols 
+  go_genes_long <- as.data.frame(matrix(nrow = 0, ncol = 4) )
+  
+  for (i in all_res_final$GO.ID) {
+  ids_df <- go_ids %>% 
+  filter(namespace_1003 == "biological_process") %>%
+  filter(go_id %in% i)
+  go_genes_long <- rbind(go_genes_long, ids_df)
+  } 
+  go_genes_long <- go_genes_long %>% left_join(all_res_final, by=c("go_id"="GO.ID"))
+  
+  go_genes_concat <- aggregate(external_gene_name ~ go_id, go_genes_long, function(x) paste(x, collapse = '/'))
+  all_res_final <- all_res_final %>%
+    left_join(go_genes_concat, by=c("GO.ID"="go_id"))
+  
+  View(all_res_final)
+  
+  write.csv(all_res_final, paste0("output/topGO_", name, ".csv"),row.names=FALSE)
+  write.csv(go_genes_long,paste0("output/topGO_", name, "_genes_long.csv"), row.names=FALSE)
+  
+}
+
+run_topGO_mouse <- function(geneUniverse, genesOfInterest, ID, name){
+  
+  #geneUniverse = liver.pro$entrez
+  #genesOfInterest = liver.pro.CSCW$entrez
+  #ID = 'entrezgene_id' # Or 'external_gene_name', 'ensembl_gene_id'
+  #name = 'liver_proteomics'
+  
+  # create GO db for genes to be used (bg contains goi already) using biomaRt - takes a while
+  db <- useMart('ENSEMBL_MART_ENSEMBL',dataset='mmusculus_gene_ensembl', host="https://www.ensembl.org") #'hsapiens_gene_ensembl'
+  #View(listAttributes(db))
+  go_ids <- getBM(attributes = c('go_id', ID, 'external_gene_name', 'namespace_1003'), 
+                  filters = ID, #'ensembl_gene_id', 'external_gene_name', 
+                  values=geneUniverse, mart=db, useCache = FALSE)
+  
+  # build the gene 2 GO annotation list (needed to create topGO object)
+  gene_2_GO <- unstack(go_ids[,c(1,2)])
+  
+  # remove any test genes without GO annotation
+  keep <- genesOfInterest %in% go_ids[,2]
+  genesOfInterest <- genesOfInterest[keep]
+  
+  # make named factor showing which genes are of interest (GOI will be 1, other backgound genes will be 0)
+  geneList <- factor(as.integer(geneUniverse %in% genesOfInterest)) 
+  names(geneList) <- geneUniverse
+  
+  
+  # make topGO data object we need:
+  # ontology: character string specifying the ontology of interest (BP, MF or CC)
+  # allGenes: named vector of type numeric or factor. The names attribute contains the genes identifiers. The genes listed in this object define the gene universe.
+  # nodeSize: an integer larger or equal to 1. This parameter is used to prune the GO hierarchy from the terms which have less than nodeSize annotated genes (after the true path rule is applied).
+  # annotationFun: function which maps genes identifiers to GO terms. There are a couple of annotation function included in the package trying to address the user’s needs.
+  # The annotation functions take three arguments. One of those arguments is specifying where the mappings can be found, and needs to be provided by the user.
+  # annFUN.gene2GO this function is used when the annotations are provided as a gene-to-GOs mapping.
+  
+  GOdata <- new('topGOdata', ontology='BP', allGenes = geneList, geneSelectionFun = function(x)(x == 1), annot = annFUN.gene2GO, gene2GO = gene_2_GO)
+  
+  # TEST FOR SIGNIFICANCE
+  
+  # define test using the classic algorithm with fisher (refer to [1] if you want to understand how the different algorithms work)
+  classic_fisher_result <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+  # define test using the weight01 algorithm (default) with fisher
+  weight_fisher_result <- runTest(GOdata, algorithm='weight01', statistic='fisher') # see Alexa 2006, Bioinformatics 22, no. 13 doi:10.1093/bioinformatics/btl140.
+  # ks_result <- runTest(GOdata, algorithm = "weight01", statistic = "ks")
+  # elim_fisher_result <- runTest(GOdata, algorithm='elim', statistic='fisher')
+
+
+  # check results 
+  tab <- GenTable(GOdata, raw.p.value = weight_fisher_result, topNodes = length(weight_fisher_result@score), numChar = 120)
+  
+  # generate a table of results
+  allGO <- usedGO(GOdata)
+  all_res <- GenTable(GOdata, Fisher=classic_fisher_result, weightFisher=weight_fisher_result, orderBy='weightFisher', ranksOf='weightFisher', topNodes=length(allGO), numChar = 150)
+  
+  # perform BH correction on p values
+  fdr <- round(p.adjust(all_res$Fisher, method="BH"),digits = 10)
+  
+  # create the file with all the statistics from GO analysis
+  all_res_final<-cbind(all_res,fdr)
+  
+  # get gene symbols 
+  go_genes_long <- as.data.frame(matrix(nrow = 0, ncol = 4) )
+  
+  for (i in all_res_final$GO.ID) {
+  ids_df <- go_ids %>% 
+  filter(namespace_1003 == "biological_process") %>%
+  filter(go_id %in% i)
+  go_genes_long <- rbind(go_genes_long, ids_df)
+  } 
+  go_genes_long <- go_genes_long %>% left_join(all_res_final, by=c("go_id"="GO.ID"))
+  
+  go_genes_concat <- aggregate(external_gene_name ~ go_id, go_genes_long, function(x) paste(x, collapse = '/'))
+  all_res_final <- all_res_final %>%
+    left_join(go_genes_concat, by=c("GO.ID"="go_id"))
+  
+  View(all_res_final)
+  
+  write.csv(all_res_final, paste0("output/topGO_", name, ".csv"),row.names=FALSE)
+  write.csv(go_genes_long,paste0("output/topGO_", name, "_genes_long.csv"), row.names=FALSE)
+  
+}
+
+#write.csv(go_ids, "go_ids_example.csv", row.names = F)
+View(go_ids)
+View(all_res)
+all_res$GO.ID
+
+
+
+```
+
+```{r GSEA topGO vignette}
+library(topGO)
+#BiocManager::install("ALL")
+library(ALL)
+
+BiocManager::install("hgu95av2.db")
+
+data(ALL)
+data(geneList)
+View(ALL)
+View(geneList)
+
+affyLib <- paste(annotation(ALL), "db", sep = ".")
+View(affyLib)
+library(package = affyLib, character.only = TRUE) # need to install hgu95av2.db package
+
+sum(topDiffGenes(geneList))
+
+sampleGOdata <- new("topGOdata",
+                    description = "Simple session", ontology = "BP",
+                    allGenes = geneList, geneSel = topDiffGenes,
+                    nodeSize = 10,
+                    annot = annFUN.db, affyLib = affyLib)
+sampleGOdata
+
+
+resultFisher <- runTest(sampleGOdata, algorithm = "classic", statistic = "fisher")
+
+resultFisher
+
+resultKS <- runTest(sampleGOdata, algorithm = "classic", statistic = "ks")
+resultKS.elim <- runTest(sampleGOdata, algorithm = "elim", statistic = "ks")
+
+allRes <- GenTable(sampleGOdata, classicFisher = resultFisher,
+                   classicKS = resultKS, elimKS = resultKS.elim,
+                   orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 10)
+
+View(allRes)
+
+showSigOfNodes(sampleGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
+
+#
+GOdata <- new("topGOdata",
+              description = "GO analysis of ALL data; B-cell vs T-cell",
+              ontology = "BP",
+              allGenes = geneList,
+              geneSel = topDiffGenes,
+              annot = annFUN.db,
+              nodeSize = 5,
+              affyLib = affyLib)
+
+View(GOdata)
+
+# K-S
+test.stat <- new("elimScore", testStatistic = GOKSTest, name = "Fisher test", cutOff = 0.01)
+View(test.stat)
+resultElim <- getSigGroups(GOdata, test.stat)
+View(resultElim)
+
+
+
+allRes <- GenTable(GOdata, classic = resultFis, KS = resultKS, weight = resultWeight, orderBy = "weight", ranksOf = "classic", topNodes = 20)
+
+
+#
+
+  
+  GOdata <- new('topGOdata', ontology='BP', allGenes = geneList, geneSelectionFun = function(x)(x == 1), annot = annFUN.gene2GO, gene2GO = gene_2_GO)
+  
+weight_fisher_result <- runTest(GOdata, algorithm='weight01', statistic='fisher') # see Alexa 2006, Bioinformatics 22, no. 13 doi:10.1093/bioinformatics/btl140.
+  # ks_result <- runTest(GOdata, algorithm = "weight01", statistic = "ks")
+  # elim_fisher_result <- runTest(GOdata, algorithm='elim', statistic='fisher')
+
+
+  # check results 
+  tab <- GenTable(GOdata, raw.p.value = weight_fisher_result, topNodes = length(weight_fisher_result@score), numChar = 120)
+  
+  # generate a table of results
+  allGO <- usedGO(GOdata)
+  all_res <- GenTable(GOdata, Fisher=classic_fisher_result, weightFisher=weight_fisher_result, orderBy='weightFisher', ranksOf='weightFisher', topNodes=length(allGO), numChar = 150)
+```
+
+
+```{r}
+install.packages('SetRank_1.1.0.tar.gz', repos=NULL, type='source')
+library(SetRank)
+```
+# create GO db for genes to be used (bg contains goi already) using biomaRt - takes a while
+db <- useMart('ENSEMBL_MART_ENSEMBL',dataset='hsapiens_gene_ensembl', host="www.ensembl.org")
+go_ids <- getBM(attributes = c('go_id', 'ensembl_gene_id', 'namespace_1003'), filters = 'ensembl_gene_id', values=geneUniverse, mart=db, useCache = FALSE)
+
+# build the gene 2 GO annotation list (needed to create topGO object)
+gene_2_GO <- unstack(go_ids[,c(1,2)])
+
+# remove any test genes without GO annotation
+keep <- genesOfInterest %in% go_ids[,2]
+keep <- which(keep==TRUE)
+genesOfInterest <- genesOfInterest[keep]
+
+# make named factor showing which genes are of interest
+geneList <- factor(as.integer(geneUniverse %in% genesOfInterest))
+names(geneList) <- geneUniverse
+
+# make topGO data object we need:
+# ontology: character string specifying the ontology of interest (BP, MF or CC)
+# allGenes: named vector of type numeric or factor. The names attribute contains the genes identifiers. The genes listed in this object define the gene universe.
+# nodeSize: an integer larger or equal to 1. This parameter is used to prune the GO hierarchy from the terms which have less than nodeSize annotated genes (after the true path rule is applied).
+# annotationFun: function which maps genes identifiers to GO terms. There are a couple of annotation function included in the package trying to address the user’s needs.
+# The annotation functions take three arguments. One of those arguments is specifying where the mappings can be found, and needs to be provided by the user.
+# annFUN.gene2GO this function is used when the annotations are provided as a gene-to-GOs mapping.
+
+GOdata <- new('topGOdata', ontology='BP', allGenes = geneList, geneSelectionFun = function(x)(x == 1), annot = annFUN.gene2GO, gene2GO = gene_2_GO)
+
+# TEST FOR SIGNIFICANCE
+gc()
+
+fisher_result <- runTest(GOdata, algorithm = "classic", statistic = "fisher")
+weight_fisher_result <- runTest(GOdata, algorithm='weight01', statistic='fisher') # see Alexa 2006, Bioinformatics 22, no. 13 doi:10.1093/bioinformatics/btl140.
+# ks_result <- runTest(GOdata, algorithm = "weight01", statistic = "ks")
+# elim_fisher_result <- runTest(GOdata, algorithm='elim', statistic='fisher')
+
+
+# # check results 
+tab <- GenTable(GOdata, raw.p.value = weight_fisher_result, topNodes = length(weight_fisher_result@score), numChar = 120)
+head(tab, 15)
+
+#generate a table of results
+allGO<-usedGO(GOdata)
+all_res <- GenTable(GOdata, Fisher=fisher_result, weightFisher=weight_fisher_result, orderBy='weightFisher', ranksOf='weightFisher', topNodes=length(allGO), numChar = 150)
+# perform BH correction on p values
+fdr<-round(p.adjust(all_res$Fisher, method="BH"),digits = 10)
+
+# create the file with all the statistics from GO analysis
+all_res_final<-cbind(all_res,fdr)
+all_res_final<-all_res_final[order(all_res_final$weightFisher),]
+
+results.table.bh <- all_res_final[which(all_res_final$fdr<=0.05),]
+write.table(results.table.bh,"topGO_all_sig_Genes_Model6_ENSG_BIOSTAT-CHF.txt",sep="\t", quote=FALSE, row.names=FALSE)
+
+# PLOT
+# requires Rgraphviz, problematic on osx
+# see http://stackoverflow.com/questions/8935606/not-able-to-install-r-package-rgraphviz-on-mac-os-x-lion
+# install macports: https://www.macports.org/install.php
+# run sudo port install graphviz
+# then install Rgraphviz (biocLite('Rgraphviz'))
+
+par(cex = 0.2)
+showSigOfNodes(GOdata, score(weight_fisher_result), firstSigNodes = 6, useInfo = 'all')
+printGraph(GOdata, weight_fisher_result, firstSigNodes = 6, fn.prefix = "tGO", useInfo = 'all', pdfSW = TRUE)
+
+# pdf(file='topGOPlot_fullnames.pdf', height=12, width=12, paper='special', pointsize=18)
+# showSigOfNodes(GOdata, score(weight_fisher_result), useInfo = "all", sigForAll=FALSE, firstSigNodes=3, .NO.CHAR=75)
+# dev.off()
+
+# # Revigo
+# reviGO_table<-subset(all_res_final[1:100,],select=c(1-11))
+# write.table(reviGO_table,"input_revigo.txt",sep="\t",quote=F,row.names=FALSE)
+
+#---------get the genes in your significant GO TERMS
+
+# Create a map of geneIDs to GO terms
+ann.genes <- genesInTerm(GOdata)
+str(ann.genes)
+
+# Select a few GO terms from the Fisher analysis - sort first
+# fisher.go <- names(score(weight_fisher_result))[1:100]
+fisher.ann.genes <- genesInTerm(GOdata, whichGO= c('GO:0048821'))
+write.table(fisher.ann.genes,"Model6_GO_0048821_back_to_gene_mapping.txt",sep="\t",quote=F)
+
+```
+
