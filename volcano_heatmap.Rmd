@@ -1,0 +1,614 @@
+---
+title: "volcano_heatmap"
+author: "Howard Cen"
+date: "2024-11-20"
+output: html_document
+---
+
+```{r }
+library(tidyverse)
+library(ggrepel)
+
+
+plot.volcano <- function(df, p_col, p_cutoff, log2FC_col, log2FC_cutoff, gene_num, gene_col, vs, name){
+  
+  df <- df %>% 
+    mutate(log_padj = -log10(!!rlang::sym(p_col)))
+  #           sign_p = -log10(!!rlang::sym(p_col)) * sign(!!rlang::sym(log2FC_col)))
+  
+  # select top or neg x genes to label
+  pos_label <- df[order(df[[p_col]]), ] %>% 
+    filter(!!rlang::sym(log2FC_col) > 0) %>%
+    slice_head(n = gene_num) %>%
+    pull(gene_col)
+  
+  neg_label <- df[order(df[[p_col]]), ] %>% 
+    filter(!!rlang::sym(log2FC_col) < 0) %>%
+    slice_head(n = gene_num) %>%
+    pull(gene_col)
+  
+  label_genes <- c(pos_label,neg_label)
+  
+  df <- df %>%
+    mutate(label = ifelse(!!rlang::sym(gene_col) %in% label_genes, !!rlang::sym(gene_col), ""))
+  
+  #write.csv(df, paste0("output/volcano_RNAseq_", name, ".csv"), row.names = F)
+  
+  df.inf <- df
+  df.inf[!is.finite(df$log_padj), "log_padj"] <- max(df$log_padj[is.finite(df$log_padj)]) * 1.08
+  
+  df_pos <- df.inf[df.inf[[log2FC_col]] > log2FC_cutoff & df.inf[[p_col]] < p_cutoff,]
+  df_neg <- df.inf[df.inf[[log2FC_col]] < -log2FC_cutoff & df.inf[[p_col]] < p_cutoff,]
+  
+  df_ns <- df.inf[!df.inf[[gene_col]] %in% c(df_pos[[gene_col]], df_neg[[gene_col]]), ]
+  
+  
+  
+  p <- ggplot(data=df.inf, #[plot.df$adj.p<0.05,],
+              aes(x = !!rlang::sym(log2FC_col), y = log_padj 
+              )) +
+    ylab(expression('-log10 adj.Pvalue')) + #-log[10]~(adj.~P~value)
+    xlab(paste0("log2(", gsub("_","/",vs))) +
+    geom_point(data = df_ns,
+               size = 2.5,
+               color = "grey", stroke = 0, alpha = 0.6) +
+    geom_point(data = df_pos,
+               size = 2.5,
+               color = "red3", stroke = 0, alpha = 0.6) +
+    geom_point(data = df_neg,
+               size = 2.5,
+               color = "blue3", stroke = 0, alpha = 0.6) +
+    #geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+    
+    #ylim(c(NA, max((-log10( df[is.finite(-log10(df[[p_col]])),][[p_col]])))*1.3)) +
+    
+    ggrepel::geom_text_repel(
+      data = df_pos, 
+      aes(label = label),
+      color="red3",
+      size=4,
+      nudge_x =  max(df[[log2FC_col]]) + max(abs(min(df[[log2FC_col]])),abs(max(df[[log2FC_col]])))*0.3 - df_pos[[log2FC_col]],
+      segment.size=0.1, 
+      #segment.color="grey", 
+      direction="y", 
+      hjust= 1, # adjusting this somehow reduced overlap
+      #max.iter = 100000,
+      max.overlaps = Inf) +
+    
+    ggrepel::geom_text_repel(
+      data = df_neg, 
+      aes(label = label),
+      color="blue3",
+      size=4,
+      nudge_x =  min(df[[log2FC_col]]) - max(abs(min(df[[log2FC_col]])),abs(max(df[[log2FC_col]])))*0.3 - df_neg[[log2FC_col]],
+      segment.size=0.1, 
+      #segment.color="grey", 
+      direction="y", 
+      hjust= 0, # adjusting this somehow reduced overlap
+      #max.iter = 100000,
+      max.overlaps = Inf) +
+    
+    #ggtitle(name) +
+    
+    coord_cartesian(clip = "off") +
+    
+    theme(legend.position = "right",
+          legend.title = element_text(hjust = 0, # left align
+                                      margin = margin(t = 15, unit = "pt")) # add more space on top of legend titles
+          #legend.spacing.y = unit(1,"cm")
+    ) +
+    theme(panel.grid.minor.y = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          text=element_text(size=14),
+          axis.text=element_text(size=12),
+          axis.title=element_text(size=14),
+          legend.text=element_text(size=14),
+          legend.title=element_text(size=14),
+          aspect.ratio = 1/1.2, panel.grid.major = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black")) + 
+    theme(plot.title = element_text(hjust = 0.5, face = "italic", colour="grey30", size=15))
+  
+  fpath <- paste0("figures/volcano_", name, "_", vs)
+  
+  p
+  ggsave(paste0(fpath,".pdf"), height = 5.5, width = 5.5, units = "in")
+  
+  p
+  ggsave(paste0(fpath,".svg"), height = 5.5, width = 5.5, units = "in")
+} 
+  
+
+```
+
+```{r selected-volcano}
+
+plot.volcano.select <- function(df, p_col, p_cutoff, log2FC_col, log2FC_cutoff, selected, gene_col, name){
+  
+  df <- df %>% 
+    mutate(log_padj = -log10(!!rlang::sym(p_col)))
+  #           sign_p = -log10(!!rlang::sym(p_col)) * sign(!!rlang::sym(log2FC_col)))
+  
+  # select top or neg x genes to label
+  
+  
+  df <- df %>%
+    mutate(label = ifelse(!!rlang::sym(gene_col) %in% selected, !!rlang::sym(gene_col), ""))
+  
+  #write.csv(df, paste0("output/volcano_RNAseq_", name, ".csv"), row.names = F)
+  
+  df.inf <- df
+  df.inf[!is.finite(df$log_padj), "log_padj"] <- max(df$log_padj[is.finite(df$log_padj)]) * 1.08
+  
+  df_pos <- df.inf[df.inf[[log2FC_col]] > log2FC_cutoff & df.inf[[p_col]] < p_cutoff,]
+  df_neg <- df.inf[df.inf[[log2FC_col]] < -log2FC_cutoff & df.inf[[p_col]] < p_cutoff,]
+  
+  df_ns <- df.inf[!df.inf[[gene_col]] %in% c(df_pos[[gene_col]], df_neg[[gene_col]]), ]
+  
+  
+  
+  p <- ggplot(data=df.inf, #[plot.df$adj.p<0.05,],
+              aes(x = !!rlang::sym(log2FC_col), y = log_padj 
+              )) +
+    ylab(expression('-log10 adj.Pvalue')) + #-log[10]~(adj.~P~value)
+    xlab(paste0("log2(ISX9/DMSO)")) +
+    
+    geom_point(data = df_pos,
+               size = 2.5,
+               color = "red3", stroke = 0, alpha = 0.6) +
+    geom_point(data = df_neg,
+               size = 2.5,
+               color = "blue3", stroke = 0, alpha = 0.6) +
+    geom_point(data = df_ns,
+               size = 2.5,
+               color = "grey", stroke = 0, alpha = 0.6) +
+    #geom_hline(yintercept = -log10(0.05), linetype = "dashed") +
+    
+    #ylim(c(NA, max((-log10( df[is.finite(-log10(df[[p_col]])),][[p_col]])))*1.3)) +
+    
+    ggrepel::geom_text_repel(
+      data = df_pos, 
+      aes(label = label),
+      color="red3",
+      size=4,
+      nudge_x =  max(df[[log2FC_col]]) + max(abs(min(df[[log2FC_col]])),abs(max(df[[log2FC_col]])))*0.3 - df_pos[[log2FC_col]],
+      segment.size=0.1, 
+      #segment.color="grey", 
+      direction="y", 
+      hjust= 1, # adjusting this somehow reduced overlap
+      #max.iter = 100000,
+      max.overlaps = Inf) +
+    
+    ggrepel::geom_text_repel(
+      data = df_neg, 
+      aes(label = label),
+      color="blue3",
+      size=4,
+      nudge_x =  min(df[[log2FC_col]]) - max(abs(min(df[[log2FC_col]])),abs(max(df[[log2FC_col]])))*0.3 - df_neg[[log2FC_col]],
+      segment.size=0.1, 
+      #segment.color="grey", 
+      direction="y", 
+      hjust= 0, # adjusting this somehow reduced overlap
+      #max.iter = 100000,
+      max.overlaps = Inf) +
+    
+    #ggtitle(name) +
+    
+    coord_cartesian(clip = "off") +
+    
+    theme(legend.position = "right",
+          legend.title = element_text(hjust = 0, # left align
+                                      margin = margin(t = 15, unit = "pt")) # add more space on top of legend titles
+          #legend.spacing.y = unit(1,"cm")
+    ) +
+    theme(panel.grid.minor.y = element_blank(),
+          panel.grid.minor.x = element_blank(),
+          text=element_text(size=14),
+          axis.text=element_text(size=12),
+          axis.title=element_text(size=14),
+          legend.text=element_text(size=14),
+          legend.title=element_text(size=14),
+          aspect.ratio = 1/1.2, panel.grid.major = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black")) + 
+    theme(plot.title = element_text(hjust = 0.5, face = "italic", colour="grey30", size=15))
+  
+  fpath <- paste0("figures/volcano_", name)
+  
+  p
+  ggsave(paste0(fpath,".pdf"), height = 5.5, width = 5.5, units = "in")
+  
+  p
+  ggsave(paste0(fpath,".svg"), height = 5.5, width = 5.5, units = "in")
+}
+
+#
+#res <- read.delim(file="output/ISX_DE_results.txt", row.names = 1)
+res <- read.delim(file="output/ISX_DE_LFCshrinkage_results.txt", row.names = 1)
+
+# save results - significant genes (DEG)
+res.sig <- res[res$padj <= 0.05,]
+dim(res.sig) # 6866_6882 DE
+
+#write.table(res.sig, sep="\t",file=paste0("output/Results_DE.txt"), row.names=TRUE,col.names=NA,quote=FALSE)
+
+res.up <- res.sig[res.sig$log2FoldChange>0,]
+res.down <- res.sig[res.sig$log2FoldChange<0,]
+
+dim(res.up) #  3600 up
+dim(res.down) # 3282 down
+
+# Selected gene list 
+selected1 <- c('PDX1', 'NKX6-1', 'SOX9', 'GP2', 'F2', 'ONECUT1', 'SOX17', 'NEUROG3', 'NEUROD1', 'CHGA', 'ISL1', 'INS', 'GCG', 'SST', 'ALB', 'LEFTY1', 'GDF3', 'CXCR4', 'ONECUT3', 'PROX1', 'MKI67', 'INSM1', 'FOXA2')
+
+selected2 <- c('PDX1', 'NKX6-1', 'SOX9', 'GP2', 'F2', 'ONECUT1', 'HNF4A', 'SOX17', 'PTF1A', 'NEUROG3', 'NEUROD1', 'CHGA', 'SYP', 'ISL1', 'INS', 'GCG', 'SST', 'GHRL', 'GDF3', 'CXCR4', 'ONECUT3', 'PROX1', 'MKI67', 'INSM1', 'FOXA2', 'GATA6', 'KRT19', 'PCDH1', 'MMP2', 'CALB1', 'CD274', 'GLP1R', 'CPE', 'IRX2', 'SLIT1', 'SLIT3', 'ROBO3', 'EPHB1', 'EPHB3', 'FGF2', 'EPHA10', 'CD47', 'DPPA4', 'COL1A2', 'CRABP1', 'FLT4', 'LEFTY1', 'ALB', 'UCN3', 'RBP4', 'GRIN2A', 'NKX2-2', 'ERBB3', 'NOTCH1', 'NOTCH3', 'HES1', 'HEY1', 'SLC30A8', 'CDH1', 'KRT18', 'CTNNB1', 'PAX6', 'YAP1', 'MUC1', 'FOXO1', 'KLF6', 'RHOB', 'KRT18', 'KRT8', 'MCM2', 'MCM3')
+
+
+
+selected2[!selected2 %in% res$symbol]
+# GDF3 not detected: "ENSG00000184344" 0 0 0 (DMSO) 0 5 3 (ISX)
+
+
+plot.volcano.select(
+  df = res, 
+  selected = selected1,
+             p_col = "padj",
+             p_cutoff = 0.05,
+             log2FC_col = "log2FoldChange",
+             log2FC_cutoff = 0,
+             gene_col = "symbol", 
+             name = "ISX_select1")
+
+plot.volcano.select(
+  df = res, 
+  selected = selected1,
+             p_col = "padj",
+             p_cutoff = 0.05,
+             log2FC_col = "log2FoldChange",
+             log2FC_cutoff = 0.5,
+             gene_col = "symbol", 
+             name = "ISX_select1_FC0.5")
+
+plot.volcano.select(
+  df = res, 
+  selected = selected2,
+             p_col = "padj",
+             p_cutoff = 0.05,
+             log2FC_col = "log2FoldChange",
+             log2FC_cutoff = 0,
+             gene_col = "symbol", 
+             name = "ISX_select2")
+
+plot.volcano.select(
+  df = res, 
+  selected = selected2,
+             p_col = "padj",
+             p_cutoff = 0.05,
+             log2FC_col = "log2FoldChange",
+             log2FC_cutoff = 0.5,
+             gene_col = "symbol", 
+             name = "ISX_select2_FC0.5")
+
+```
+
+```{r selected-heatmap}
+# Selected gene list ===============
+
+#selected <- c('PDX1', 'NKX6-1', 'SOX9', 'GP2', 'F2', 'ONECUT1', 'SOX17', 'NEUROG3', 'NEUROD1', 'CHGA', 'ISL1', 'INS', 'GCG', 'SST', 'ALB', 'LEFTY1', 'GDF3', 'CXCR4', 'ONECUT3', 'PROX1', 'MKI67', 'INSM1', 'FOXA2')
+
+selected <- c('PDX1', 'NKX6-1', 'SOX9', 'GP2', 'F2', 'ONECUT1', 'HNF4A', 'SOX17', 'PTF1A', 'NEUROG3', 'NEUROD1', 'CHGA', 'SYP', 'ISL1', 'INS', 'GCG', 'SST', 'GHRL', 'GDF3', 'CXCR4', 'ONECUT3', 'PROX1', 'MKI67', 'INSM1', 'FOXA2', 'GATA6', 'KRT19', 'PCDH1', 'MMP2', 'CALB1', 'CD274', 'GLP1R', 'CPE', 'IRX2', 'SLIT1', 'SLIT3', 'ROBO3', 'EPHB1', 'EPHB3', 'FGF2', 'EPHA10', 'CD47', 'DPPA4', 'COL1A2', 'CRABP1', 'FLT4', 'LEFTY1', 'ALB', 'UCN3', 'RBP4', 'GRIN2A', 'NKX2-2', 'ERBB3', 'NOTCH1', 'NOTCH3', 'HES1', 'HEY1', 'SLC30A8', 'CDH1', 'KRT18', 'CTNNB1', 'PAX6', 'YAP1', 'MUC1', 'FOXO1', 'KLF6', 'RHOB', 'KRT18', 'KRT8', 'MCM2', 'MCM3')
+
+#res <- read.delim(file="output/ISX_DE_results.txt", row.names = 1)
+res <- read.delim(file="output/ISX_DE_LFCshrinkage_results.txt", row.names = 1)
+
+
+res.sig <- res[res$padj <= 0.05,]
+dim(res.sig) # 6866 DE
+
+#write.table(res.sig, sep="\t",file=paste0("output/Results_DE.txt"), row.names=TRUE,col.names=NA,quote=FALSE)
+
+res.up <- res.sig[res.sig$log2FoldChange>0,]
+res.down <- res.sig[res.sig$log2FoldChange<0,]
+
+dim(res.up) #  3612 up
+dim(res.down) # 3254 down
+
+
+selected[-which(selected %in% res$symbol)]
+# GDF3 not detected: "ENSG00000184344" 0 0 0 (DMSO) 0 5 3 (ISX)
+
+selected.ns <- selected[-which(selected %in% res.sig$symbol)]
+
+# "GP2" "PTF1A" "NEUROD1" "SYP" "FOXA2" "HES1" "YAP1" are not DE
+
+selected.sig <- selected[-which(selected %in% selected.ns)]
+
+
+
+# 
+norm.data <- read.csv("output/norm_VST.csv")
+rownames(norm.data) <- norm.data$ENSG
+View(norm.data)
+
+# heatmap with selected genes
+m<- norm.data[norm.data$symbol %in% selected.sig, ]
+
+# heatmap with all DE genes
+m <- norm.data[res.sig$ENSG, ]
+at <- match(selected.sig, m$symbol)
+labels <- selected.sig
+
+View(m)
+
+# common
+m.z <- t(scale(t(m[1:6]))) #%>% as.data.frame()
+View(m.z)
+colnames(m.z)
+ceiling(max(abs(m.z)))
+
+number_of_d <- length(grep("DMSO", colnames(m.z)))
+number_of_x <- length(grep("ISX", colnames(m.z)))
+
+end_index_d <- grep("DMSO", colnames(m.z))[number_of_d]
+end_index_x <- grep("ISX", colnames(m.z))[number_of_x]
+
+# use color blind friendly palette
+cbPalette <- c("#E69F00", #lightorange
+               "#56B4E9", #blue
+               "#D55E00", #darkorange
+               "#009E73", #green
+               "#CC79A7", #magenta
+               "#0072B2", #darkblue
+               "#F0E442", #yellow
+               "#999999" #grey
+)
+
+### selected genes ---------
+
+heatmap.s <- Heatmap(m.z, #matrix_Z_score_total,
+                     name = "Z score",
+                     
+                     show_row_names = TRUE,
+                     
+                     show_column_names = FALSE,
+                     show_row_dend = TRUE,
+                     row_labels = gt_render(m$symbol),
+                     row_names_gp = gpar(fontsize = 8),
+                     column_names_side = "top",
+                     column_dend_side = "bottom",
+                     clustering_distance_rows = "euclidean",
+                     clustering_method_rows = "ward.D2",
+                     row_dend_side = "left",
+                     row_dend_width = unit(8, "mm"),
+                     layer_fun = function(j, i, x, y, width, height, fill) {
+                       mat = restore_matrix(j, i, x, y)
+                       ind = unique(c(mat[, c(end_index_d
+                       )]))
+                       grid.rect(x = x[ind] + unit(0.5/ncol(m.z), "npc"), 
+                                 y = y[ind], 
+                                 width = unit(0.03, "inches"), 
+                                 height = unit(1/nrow(m.z), "npc"),
+                                 gp = gpar(col = "white", fill = "white")
+                       )
+                     },
+                     col = colorRamp2(c(-3,0,3), c("blue", "white", "red")),
+                     top_annotation = columnAnnotation(empty = anno_empty(border = FALSE
+                                                                          , height = unit(12, "mm")
+                     )),
+                     
+                     column_order = 1:ncol(m.z),
+                     height = 
+                       
+                       unit(190, "mm"), 
+                     
+                     width = ncol(m.z)*unit(6, "mm"),
+                     border_gp = gpar(col = "black"),
+                     show_heatmap_legend = TRUE,
+                     heatmap_legend_param = list(
+                       title = "Row z-score",
+                       title_position = "topleft",
+                       legend_height = unit(4, "cm"))) 
+draw(heatmap.s)
+
+{svg(file = "figures/heatmap_selected.svg",
+    width = 4, 
+    height = 8.5)
+{pdf(file = "figures/heatmap_selected.pdf",
+    width = 4, 
+    height = 8.5)
+
+
+draw(heatmap.s)
+
+#
+seekViewport("annotation_empty_1")
+loc1 = deviceLoc(x = unit(0, "npc"), y = unit(0, "npc"))
+loc2 = deviceLoc(x = unit(1, "npc"), y = unit(1, "npc"))
+
+#Condition label 1
+
+
+grid.rect(x = (loc2$x - loc1$x)*(end_index_d)/2/ncol(m.z),
+          y = 0,
+          width = (loc2$x - loc1$x)*(number_of_d)/ncol(m.z), 
+          height = (loc2$y - loc1$y)/2,
+          just = c("center", "bottom"),
+          gp = gpar(fill = alpha(cbPalette[1], 0.5),
+                    col = alpha(cbPalette[1], 0.5)
+          )
+)
+grid.text(expression("DMSO"), 
+          x = (loc2$x - loc1$x)*(end_index_d)/2/ncol(m.z),
+          y = 0.25,
+          just = c("center", "center"),
+          gp = gpar(fontsize = 11,
+                    col = "black"))
+
+#Condition label 2
+
+grid.rect(x = (loc2$x - loc1$x)*(end_index_d + 
+                                   end_index_x)/2/ncol(m.z),
+          y = 0,
+          width = (loc2$x - loc1$x)*(number_of_x)/ncol(m.z), 
+          height = (loc2$y - loc1$y)/2,
+          just = c("center", "bottom"),
+          gp = gpar(fill = alpha(cbPalette[2], 0.5),
+                    col = alpha(cbPalette[2], 0.5)
+          )
+)
+grid.text(expression("ISX9"), 
+          x = (loc2$x - loc1$x)*(end_index_d + 
+                                   end_index_x)/2/ncol(m.z),
+          y = 0.25,
+          just = c("center", "center"),
+          gp = gpar(fontsize = 11))
+
+
+
+
+
+#Top label gaps
+#Vertical lines
+grid.rect(x = end_index_d/ncol(m.z),
+          y = 0,
+          height = (loc2$y - loc1$y)/2,
+          width = unit(0.03, "inches"),
+          just = c("center", "bottom"),
+          gp = gpar(fill = "white", 
+                    col = "white", 
+                    lwd = 1
+          ))
+
+
+dev.off()}
+  
+  
+  
+### all DE genes + label selected genes -------
+  
+heatmap.de <- Heatmap(m.z, #matrix_Z_score_total,
+                     name = "Z score",
+                     
+                     #show_row_names = TRUE,
+                     show_row_names = FALSE,
+                     
+                     show_column_names = FALSE,
+                     show_row_dend = TRUE,
+                     #row_labels = gt_render(m$symbol,
+                     row_names_gp = gpar(fontsize = 8),
+                     column_names_side = "top",
+                     column_dend_side = "bottom",
+                     clustering_distance_rows = "euclidean",
+                     clustering_method_rows = "ward.D2",
+                     row_dend_side = "left",
+                     row_dend_width = unit(8, "mm"),
+                     layer_fun = function(j, i, x, y, width, height, fill) {
+                       mat = restore_matrix(j, i, x, y)
+                       ind = unique(c(mat[, c(end_index_d
+                       )]))
+                       grid.rect(x = x[ind] + unit(0.5/ncol(m.z), "npc"), 
+                                 y = y[ind], 
+                                 width = unit(0.03, "inches"), 
+                                 height = unit(1/nrow(m.z), "npc"),
+                                 gp = gpar(col = "white", fill = "white")
+                       )
+                     },
+                     col = colorRamp2(c(-3,0,3), c("blue", "white", "red")),
+                     top_annotation = columnAnnotation(empty = anno_empty(border = FALSE
+                                                                          , height = unit(12, "mm")
+                     )),
+                     
+                     column_order = 1:ncol(m.z),
+                     height = 
+                       
+                       unit(190, "mm"), 
+                     
+                     width = ncol(m.z)*unit(6, "mm"),
+                     border_gp = gpar(col = "black"),
+                     show_heatmap_legend = TRUE,
+                     heatmap_legend_param = list(
+                       title = "Z-score",
+                       title_position = "topleft",
+                       legend_height = unit(4, "cm"))) +
+  rowAnnotation(label = anno_mark(at = at, labels = labels,
+                                  labels_gp = gpar(col = "black", fontsize = 8))
+  )
+
+draw(heatmap.de)
+
+
+## plot all DE + selected
+
+{pdf(file = "figures/heatmap_allDE_selected.pdf",
+    width = 4, 
+    height = 8.5)
+
+{svg(file = "figures/heatmap_allDE_selected.svg",
+    width = 4, 
+    height = 8.5)
+draw(heatmap.de)
+
+#
+seekViewport("annotation_empty_1")
+loc1 = deviceLoc(x = unit(0, "npc"), y = unit(0, "npc"))
+loc2 = deviceLoc(x = unit(1, "npc"), y = unit(1, "npc"))
+
+####Condition labels
+
+#Condition label 1
+
+
+grid.rect(x = (loc2$x - loc1$x)*(end_index_d)/2/ncol(m.z),
+          y = 0,
+          width = (loc2$x - loc1$x)*(number_of_d)/ncol(m.z), 
+          height = (loc2$y - loc1$y)/2,
+          just = c("center", "bottom"),
+          gp = gpar(fill = alpha(cbPalette[1], 0.5),
+                    col = alpha(cbPalette[1], 0.5)
+          )
+)
+grid.text(expression("DMSO"), 
+          x = (loc2$x - loc1$x)*(end_index_d)/2/ncol(m.z),
+          y = 0.25,
+          just = c("center", "center"),
+          gp = gpar(fontsize = 11,
+                    col = "black"))
+
+#Condition label 2
+
+grid.rect(x = (loc2$x - loc1$x)*(end_index_d + 
+                                   end_index_x)/2/ncol(m.z),
+          y = 0,
+          width = (loc2$x - loc1$x)*(number_of_x)/ncol(m.z), 
+          height = (loc2$y - loc1$y)/2,
+          just = c("center", "bottom"),
+          gp = gpar(fill = alpha(cbPalette[2], 0.5),
+                    col = alpha(cbPalette[2], 0.5)
+          )
+)
+grid.text(expression("ISX9"), 
+          x = (loc2$x - loc1$x)*(end_index_d + 
+                                   end_index_x)/2/ncol(m.z),
+          y = 0.25,
+          just = c("center", "center"),
+          gp = gpar(fontsize = 11))
+
+
+
+
+
+###Top label gaps
+
+#Vertical lines
+grid.rect(x = end_index_d/ncol(m.z),
+          y = 0,
+          height = (loc2$y - loc1$y)/2,
+          width = unit(0.03, "inches"),
+          just = c("center", "bottom"),
+          gp = gpar(fill = "white", 
+                    col = "white", 
+                    lwd = 1
+          ))
+
+
+dev.off()}
+
+```
