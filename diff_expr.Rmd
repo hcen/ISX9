@@ -11,6 +11,8 @@ library(tidyverse)
 #BiocManager::install("DESeq2")
 library("DESeq2")
 
+BiocManager::install("apeglm")
+
 #BiocManager::install("org.Hs.eg.db")
 library(org.Hs.eg.db)
 
@@ -104,6 +106,15 @@ summary(colSums(raw.counts))
 #    Min.  1st Qu.   Median     Mean  3rd Qu.     Max. 
 #14990023 17462594 19239534 18960576 20746653 22175062 
 
+raw.counts$ENSG <- rownames(raw.counts)
+raw.counts$entrez <- mapIds(org.Hs.eg.db, keys=raw.counts$ENSG, column="ENTREZID", keytype="ENSEMBL", multiVals="first")
+raw.counts$symbol <- mapIds(org.Hs.eg.db, keys=raw.counts$ENSG, column="SYMBOL", keytype="ENSEMBL", multiVals="first")
+raw.counts$fullname <- mapIds(org.Hs.eg.db, keys=raw.counts$ENSG, column="GENENAME", keytype="ENSEMBL", multiVals="first")
+
+View(raw.counts)
+
+write.table(raw.counts, "output/rawcounts_names.txt", row.names = F)
+write.csv(raw.counts, "output/rawcounts_names.csv", row.names = F)
 
 # meta data
 
@@ -138,13 +149,26 @@ count.data.set.object <- DESeq(count.filter)
 # normalized counts (without VST)
 dds <- estimateSizeFactors(count.data.set.object)
 normalized.counts <- counts(dds, normalized=TRUE)
-write.csv(normalized.counts, file="output/norm_counts.csv")
+
+normalized.counts <- as.data.frame(normalized.counts)
+is.data.frame(normalized.counts)
+normalized.counts$ENSG <- rownames(normalized.counts)
+normalized.counts$entrez <- mapIds(org.Hs.eg.db, keys=normalized.counts$ENSG, column="ENTREZID", keytype="ENSEMBL", multiVals="first")
+normalized.counts$symbol <- mapIds(org.Hs.eg.db, keys=normalized.counts$ENSG, column="SYMBOL", keytype="ENSEMBL", multiVals="first")
+normalized.counts$fullname <- mapIds(org.Hs.eg.db, keys=normalized.counts$ENSG, column="GENENAME", keytype="ENSEMBL", multiVals="first")
+View(normalized.counts)
+write.csv(normalized.counts, file="output/norm_counts.csv", row.names = F)
 
 # normalized  VST counts
 vsd <- vst(count.data.set.object)
 norm.data = assay(vsd)
-write.csv(norm.data,file="output/norm_VST.csv")
-
+norm.data <- as.data.frame(norm.data)
+norm.data$ENSG <- rownames(norm.data)
+norm.data$entrez <- mapIds(org.Hs.eg.db, keys=norm.data$ENSG, column="ENTREZID", keytype="ENSEMBL", multiVals="first")
+norm.data$symbol <- mapIds(org.Hs.eg.db, keys=norm.data$ENSG, column="SYMBOL", keytype="ENSEMBL", multiVals="first")
+norm.data$fullname <- mapIds(org.Hs.eg.db, keys=norm.data$ENSG, column="GENENAME", keytype="ENSEMBL", multiVals="first")
+View(norm.data)
+write.csv(norm.data,file="output/norm_VST.csv", row.names = F)
 
 # cluster
 sampleDists <- dist(t(norm.data),  method = "euclidean") # "euclidean", "maximum", "manhattan", "canberra", "binary" or "minkowski"
@@ -450,7 +474,6 @@ dev.off()}
 #res <- results(count.data.set.object, contrast=c("group",exp,ctrl),alpha=0.05)
 res <- results(count.data.set.object, contrast=c("group","ISX9","DMSO"),alpha=0.05)
 
-
 # save result summary
 summary(res) 
 out <- capture.output(summary(res))
@@ -471,274 +494,35 @@ res$fullname <- mapIds(org.Hs.eg.db, keys=res$ENSG, column="GENENAME", keytype="
 View(res)
 write.table(res, sep="\t",file=paste0("output/ISX_DE_results.txt"), row.names=TRUE,col.names=NA,quote=FALSE)
 write.csv(res, "output/ISX_DE_results.csv", row.names = F)
+
+### with lfcshrinkage
+
+resLFC <- lfcShrink(count.data.set.object, coef="group_ISX9_vs_DMSO", type="apeglm")
+# using 'apeglm' for LFC shrinkage. Cite: Zhu, A., Ibrahim, J.G., Love, M.I. (2018) Heavy-tailed prior distributions for sequence count data: removing the noise and preserving large differences. Bioinformatics. https://doi.org/10.1093/bioinformatics/bty895
+resLFC
+
+summary(resLFC) 
+out <- capture.output(summary(resLFC))
+cat("ISX9 vs DMSO lfc shrinkage", out, file="output/results_summary.txt", sep="\n", append=TRUE)
+
+# save results - all genes
+resLFC <-  na.omit(resLFC) # omit NA
+resLFC  <-  resLFC[order(resLFC$padj),] 
+resLFC <- as.data.frame(resLFC)
+
+resLFC$ENSG <- rownames(resLFC)
+resLFC$entrez <- mapIds(org.Hs.eg.db, keys=resLFC$ENSG, column="ENTREZID", keytype="ENSEMBL", multiVals="first")
+resLFC$symbol <- mapIds(org.Hs.eg.db, keys=resLFC$ENSG, column="SYMBOL", keytype="ENSEMBL", multiVals="first")
+resLFC$fullname <- mapIds(org.Hs.eg.db, keys=resLFC$ENSG, column="GENENAME", keytype="ENSEMBL", multiVals="first")
+
+#columns(org.Hs.eg.db)
+
+View(resLFC)
+write.table(resLFC, sep="\t",file=paste0("output/ISX_DE_LFCshrinkage_results.txt"), row.names=TRUE,col.names=NA,quote=FALSE)
+write.csv(resLFC, "output/ISX_DE_LFCshrinkage_results.csv", row.names = F)
 ```
 
-```{r ORA}
-res <- read.delim(file="output/ISX_DE_results.txt", row.names = 1)
-
-# save results - significant genes (DEG)
-res.sig <- res[res$padj <= 0.05,]
-dim(res.sig) # 6882 DE
-
-#write.table(res.sig, sep="\t",file=paste0("output/Results_DE.txt"), row.names=TRUE,col.names=NA,quote=FALSE)
-
-res.up <- res.sig[res.sig$log2FoldChange>0,]
-res.down <- res.sig[res.sig$log2FoldChange<0,]
-
-dim(res.up) #  3600 up
-dim(res.down) # 3282 down
-
-
-```
-
-```{r selected-volcano}
-# Selected gene list ===============
-
-selected <- c('PDX1', 'NKX6.1', 'SOX9', 'GP2', 'F2', 'ONECUT1', 'SOX17', 'NEUROG3', 'NEUROD1', 'CHGA', 'ISL1', 'INS', 'GCG', 'SST', 'ALB', 'LEFTY1', 'GDF3', 'CXCR4', 'ONECUT3', 'PROX1', 'MKI67', 'INSM1', 'FOXA2')
-```
-
-```{r selected-heatmap}
-# Selected gene list ===============
-
-selected <- c('PDX1', 'NKX6.1', 'SOX9', 'GP2', 'F2', 'ONECUT1', 'HNF4A', 'SOX17', 'PTF1A', 'NEUROG3', 'NEUROD1', 'CHGA', 'SYP', 'ISL1', 'INS', 'GCG', 'SST', 'GHRL', 'GDF3', 'CXCR4', 'ONECUT3', 'PROX1', 'MKI67', 'INSM1', 'FOXA2', 'GATA6', 'KRT19', 'PCDH1', 'MMP2', 'CALB1', 'CD274', 'GLP1R', 'CPE', 'IRX2', 'SLIT1', 'SLIT3', 'ROBO3', 'EPHB1', 'EPHB3', 'FGF2', 'EPHA10', 'CD47', 'DPPA4', 'COL1A2', 'CRABP1', 'FLT4', 'LEFTY1', 'ALB', 'UCN3', 'RBP4', 'GRIN2A', 'NKX2.2', 'ERBB3', 'NOTCH1', 'NOTCH3', 'HES1', 'HEY1', 'SLC30A8', 'CDH1', 'KRT18', 'CTNNB1', 'PAX6', 'YAP1', 'MUC1', 'FOXO1', 'KLF6', 'RHOB', 'KRT18', 'KRT8', 'MCM2', 'MCM3')
 
 
 
-
-selected[-which(selected %in% res$symbol)]
-# "MAFA"        "CFTR"        "NKX2-5"      "CD90 (THY1)" are not in RNAseq due to low detection
-
-raw.counts[c(selected[-which(selected %in% res$symbol)],"THY1"),]
-# body1 body2 body3 body4 bud1 bud2 bud3 bud4
-# MAFA       1     1     1     1    2    1    2    1
-# CFTR       1     1     1     2    1    1    2    0
-# NKX2-5     2     1     2     2    1    0    0    0
-# NA        NA    NA    NA    NA   NA   NA   NA   NA
-# THY1      33    31    38    36    7    6    7    2
-
-selected.new <- c(selected[which(selected %in% res$symbol)],"THY1")
-
-selected.ns <- selected.new[-which(selected.new %in% res.sig$symbol)]
-# "KRT19" "AMY2B" "PBX2"  "SLIT3" are not DE
-
-selected.sig <- selected.new[-which(selected.new %in% selected.ns)]
-
-# plot the selecte gene (VST normalized counts) on heatmap ------
-
-# plot selected genes only
-norm.data <- read.delim("output/Norm_data.txt", row.names = 1)
-View(norm.data)
-m<- norm.data[selected.sig,]
-
-# plot selected genes on the heatmap of all DE genes
-m <- norm.data[res.sig$symbol,]
-at <- match(selected.new,rownames(m))
-labels <- selected.new
-
-#m <- as.matrix(as.data.frame(lapply(m.anno, as.numeric),check.names=F))
-View(m)
-m.z <- t(scale(t(m))) #%>% as.data.frame()
-View(m.z)
-colnames(m.z)
-ceiling(max(abs(m.z)))
-
-number_of_body <- length(grep("body", colnames(m.z)))
-number_of_bud <- length(grep("bud", colnames(m.z)))
-
-end_index_body <- grep("body", colnames(m.z))[number_of_body]
-end_index_bud <- grep("bud", colnames(m.z))[number_of_bud]
-
-# use color blind friendly palette
-cbPalette <- c("#E69F00", #lightorange
-               "#56B4E9", #blue
-               "#D55E00", #darkorange
-               "#009E73", #green
-               "#CC79A7", #magenta
-               "#0072B2", #darkblue
-               "#F0E442", #yellow
-               "#999999" #grey
-)
-
-## selected genes
-heatmap.b <- Heatmap(m.z, #matrix_Z_score_total,
-                     name = "Z score",
-                     
-                     show_row_names = TRUE,
-                     
-                     show_column_names = FALSE,
-                     show_row_dend = TRUE,
-                     row_labels = gt_render(row.names(m)),
-                     row_names_gp = gpar(fontsize = 8),
-                     column_names_side = "top",
-                     column_dend_side = "bottom",
-                     clustering_distance_rows = "euclidean",
-                     clustering_method_rows = "ward.D2",
-                     row_dend_side = "left",
-                     row_dend_width = unit(5, "mm"),
-                     layer_fun = function(j, i, x, y, width, height, fill) {
-                       mat = restore_matrix(j, i, x, y)
-                       ind = unique(c(mat[, c(end_index_body#, 
-                                              #end_index_bud
-                       )]))
-                       grid.rect(x = x[ind] + unit(0.5/ncol(m.z), "npc"), 
-                                 y = y[ind], 
-                                 width = unit(0.03, "inches"), 
-                                 height = unit(1/nrow(m.z), "npc"),
-                                 gp = gpar(col = "white")
-                       )
-                     },
-                     col = colorRamp2(c(-3,0,3), c("blue", "white", "red")),
-                     top_annotation = columnAnnotation(empty = anno_empty(border = FALSE
-                                                                          , height = unit(12, "mm")
-                     )),
-                     
-                     column_order = 1:ncol(m.z),
-                     height = 
-                       
-                       unit(180, "mm"), 
-                     
-                     width = ncol(m.z)*unit(6, "mm"),
-                     border_gp = gpar(col = "black"),
-                     show_heatmap_legend = TRUE,
-                     heatmap_legend_param = list(
-                       title = "Row z-score",
-                       title_position = "topleft",
-                       legend_height = unit(4, "cm"))) 
-draw(heatmap.b)
-
-### all DE genes + label selected genes
-heatmap.b <- Heatmap(m.z, #matrix_Z_score_total,
-                     name = "Z score",
-                     
-                     #show_row_names = TRUE,
-                     show_row_names = FALSE,
-                     
-                     show_column_names = FALSE,
-                     show_row_dend = TRUE,
-                     row_labels = gt_render(row.names(m)),
-                     row_names_gp = gpar(fontsize = 8),
-                     column_names_side = "top",
-                     column_dend_side = "bottom",
-                     clustering_distance_rows = "euclidean",
-                     clustering_method_rows = "ward.D2",
-                     row_dend_side = "left",
-                     row_dend_width = unit(5, "mm"),
-                     layer_fun = function(j, i, x, y, width, height, fill) {
-                       mat = restore_matrix(j, i, x, y)
-                       ind = unique(c(mat[, c(end_index_body#, 
-                                              #end_index_bud
-                       )]))
-                       grid.rect(x = x[ind] + unit(0.5/ncol(m.z), "npc"), 
-                                 y = y[ind], 
-                                 width = unit(0.03, "inches"), 
-                                 height = unit(1/nrow(m.z), "npc"),
-                                 gp = gpar(col = "white")
-                       )
-                     },
-                     col = colorRamp2(c(-3,0,3), c("blue", "white", "red")),
-                     top_annotation = columnAnnotation(empty = anno_empty(border = FALSE
-                                                                          , height = unit(12, "mm")
-                     )),
-                     
-                     column_order = 1:ncol(m.z),
-                     height = 
-                       
-                       unit(180, "mm"), 
-                     
-                     width = ncol(m.z)*unit(6, "mm"),
-                     border_gp = gpar(col = "black"),
-                     show_heatmap_legend = TRUE,
-                     heatmap_legend_param = list(
-                       title = "Z-score",
-                       title_position = "topleft",
-                       legend_height = unit(4, "cm"))) +
-  rowAnnotation(label = anno_mark(at = at, labels = labels,
-                                  labels_gp = gpar(col = "black", fontsize = 8))
-  )
-
-draw(heatmap.b)
-
-
-## plot selected genes
-png(file = "figures/heatmap_selected.png",
-    width = 4, 
-    height = 8, 
-    units = "in", res = 600)
-
-## plot all DE + selected
-png(file = "figures/heatmap_allDE_selected.png",
-    width = 4, 
-    height = 8, 
-    units = "in", res = 600)
-
-
-draw(heatmap.b)
-
-dev.off()
-#
-seekViewport("annotation_empty_1")
-loc1 = deviceLoc(x = unit(0, "npc"), y = unit(0, "npc"))
-loc2 = deviceLoc(x = unit(1, "npc"), y = unit(1, "npc"))
-
-####Condition labels
-
-#Condition label 1
-
-
-grid.rect(x = (loc2$x - loc1$x)*(end_index_body)/2/ncol(m.z),
-          y = 0,
-          width = (loc2$x - loc1$x)*(number_of_body)/ncol(m.z), 
-          height = (loc2$y - loc1$y)/2,
-          just = c("center", "bottom"),
-          gp = gpar(fill = alpha(cbPalette[1], 0.5),
-                    col = alpha(cbPalette[1], 0.5)
-          )
-)
-grid.text(expression("Body"), 
-          x = (loc2$x - loc1$x)*(end_index_body)/2/ncol(m.z),
-          y = 0.35,
-          just = c("center", "top"),
-          gp = gpar(fontsize = 11,
-                    col = "black"))
-
-#Condition label 2
-
-grid.rect(x = (loc2$x - loc1$x)*(end_index_body + 
-                                   end_index_bud)/2/ncol(m.z),
-          y = 0,
-          width = (loc2$x - loc1$x)*(number_of_bud)/ncol(m.z), 
-          height = (loc2$y - loc1$y)/2,
-          just = c("center", "bottom"),
-          gp = gpar(fill = alpha(cbPalette[2], 0.5),
-                    col = alpha(cbPalette[2], 0.5)
-          )
-)
-grid.text(expression("Bud"), 
-          x = (loc2$x - loc1$x)*(end_index_body + 
-                                   end_index_bud)/2/ncol(m.z),
-          y = 0.35,
-          just = c("center", "top"),
-          gp = gpar(fontsize = 11))
-
-
-
-
-
-###Top label gaps
-
-#Vertical lines
-grid.rect(x = end_index_body/ncol(m.z),
-          y = 0,
-          height = (loc2$y - loc1$y)/2,
-          width = unit(0.03, "inches"),
-          just = c("center", "bottom"),
-          gp = gpar(fill = "white", 
-                    col = "white", 
-                    lwd = 1
-          ))
-
-
-dev.off()
-
-```
 
